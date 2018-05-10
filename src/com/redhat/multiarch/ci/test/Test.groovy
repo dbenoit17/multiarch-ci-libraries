@@ -3,6 +3,7 @@ package com.redhat.multiarch.ci.test
 import com.redhat.multiarch.ci.provisioner.Host
 import com.redhat.multiarch.ci.provisioner.Provisioner
 import com.redhat.multiarch.ci.provisioner.ProvisioningConfig
+import com.redhat.multiarch.ci.provisioner.ConnType
 
 class Test {
   def script
@@ -59,8 +60,13 @@ class Test {
             Host host
             try {
               script.stage('Provision Host') {
+                if (config.connection == ConnType.CONTAINER) {
+                  script.node("Container Test") {
+                    test(host, config)
+                  }
+                  return
+                }
                 host = provisioner.provision(arch)
-
                 // Property validity check
                 if (!host.name || !host.arch) {
                   script.error "Invalid provisioned host: ${host}"
@@ -72,7 +78,7 @@ class Test {
                 }
               }
 
-              if (config.runOnSlave) {
+              if (config.connection == ConnType.CINCH) {
                 script.node(host.name) {
                   test(host, config)
                 }

@@ -1,8 +1,8 @@
 import com.redhat.multiarch.ci.provisioner.*
 
 def call(ProvisioningConfig config, Host host) {
-  // Cinch Mode
-  if (config.runOnSlave) {
+  // Cinch or Container Mode
+  if (config.connection == ConnType.CINCH || config.connection == ConnType.CONTAINER) {
     sh "ansible-playbook -i 'localhost,' -c local ${params.TEST_DIR}/ansible-playbooks/*/playbook.yml"
     sh "for i in ${params.TEST_DIR}/scripts/*/test.sh; do bash \$i; done"
 
