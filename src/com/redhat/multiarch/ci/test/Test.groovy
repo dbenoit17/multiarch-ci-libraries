@@ -34,6 +34,7 @@ class Test {
   def run() {
     Provisioner provisioner = new Provisioner(script, config)
 
+    String image_name = "${config.dockerUrl}/${config.tenant}/${config.provisioningImage}-${config.version}"
     script.podTemplate(
       name: "provisioner-${config.version}",
       label: "provisioner-${config.version}",
@@ -45,7 +46,7 @@ class Test {
         // This adds the custom provisioner slave container to the pod. Must be first with name 'jnlp'
         script.containerTemplate(
           name: 'jnlp',
-          image: "${config.dockerUrl}/${config.tenant}/${config.provisioningImage}-${config.version}",
+          image: image_name,
           ttyEnabled: false,
           args: '${computer.jnlpmac} ${computer.name}',
           command: '',
@@ -56,16 +57,9 @@ class Test {
       script.ansiColor('xterm') {
         script.timestamps {
           script.node("provisioner-${config.version}") {
-
             Host host
             try {
               script.stage('Provision Host') {
-                if (config.connection == ConnType.CONTAINER) {
-                  script.node("Container Test") {
-                    test(host, config)
-                  }
-                  return
-                }
                 host = provisioner.provision(arch)
                 // Property validity check
                 if (!host.name || !host.arch) {
@@ -77,6 +71,33 @@ class Test {
                   script.error host.error
                 }
               }
+              if (config.connection == ConnType.CONTAINER) {
+                script.podTemplate(
+                  name: "container-test-${config.version}",
+                  label: "container-test-${config.version}",
+                  cloud: config.cloudName,
+                  serviceAccount: 'jenkins',
+                  idleMinutes: 0,
+                  namespace: config.tenant,
+                  containers: [
+                    // This adds the custom provisioner slave container 
+                    // to the pod. Must be first with name 'jnlp'
+                    script.containerTemplate(
+                      name: 'jnlp',
+                      image: image_name,
+                      ttyEnabled: false,
+                      args: '${computer.jnlpmac} ${computer.name}',
+                      command: '',
+                      workingDir: '/tmp'
+                    )
+                  ]
+                ) {
+                    script.node("container-test-${config.version}") {
+                       test(host, config)
+                    }
+                  }
+                return
+              }
 
               if (config.connection == ConnType.CINCH) {
                 script.node(host.name) {
@@ -84,7 +105,6 @@ class Test {
                 }
                 return
               }
-
               test(host, config)
             } catch (e) {
               onTestFailure(e, host)
