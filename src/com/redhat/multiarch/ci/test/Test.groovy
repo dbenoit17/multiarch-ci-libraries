@@ -50,7 +50,8 @@ class Test {
           ttyEnabled: false,
           args: '${computer.jnlpmac} ${computer.name}',
           command: '',
-          workingDir: '/tmp'
+          workingDir: '/tmp',
+          privileged: true
         )
       ]
     ) {
@@ -59,8 +60,8 @@ class Test {
           script.node("provisioner-${config.version}") {
             Host host
             try {
+              host = provisioner.provision(arch)
               script.stage('Provision Host') {
-                host = provisioner.provision(arch)
                 // Property validity check
                 if (!host.name || !host.arch) {
                   script.error "Invalid provisioned host: ${host}"
@@ -88,7 +89,8 @@ class Test {
                       ttyEnabled: false,
                       args: '${computer.jnlpmac} ${computer.name}',
                       command: '',
-                      workingDir: '/tmp'
+                      workingDir: '/tmp',
+                      privileged: true
                     )
                   ]
                 ) {
@@ -100,6 +102,7 @@ class Test {
               }
 
               if (config.connection == ConnType.CINCH) {
+                println "cinch host: \n ${host}"
                 script.node(host.name) {
                   test(host, config)
                 }
