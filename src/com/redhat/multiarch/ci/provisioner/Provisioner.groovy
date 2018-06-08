@@ -1,4 +1,5 @@
 package com.redhat.multiarch.ci.provisioner
+import com.redhat.multiarch.ci.provisioner.ConnType
 
 import groovy.json.*
 
@@ -22,6 +23,9 @@ class Provisioner {
       target: 'jenkins-slave',
       name: "${arch}-slave"
     )
+    if (config.connection == ConnType.CONTAINER) {
+      return host
+    }
 
     try {
       installCredentials(script)
@@ -61,7 +65,7 @@ class Provisioner {
 
       host.provisioned = true
 
-      if (config.runOnSlave) {
+      if (config.connection == ConnType.CINCH) {
         host.connectedToMaster = true
 
         // We only care if the install ansible flag is set when we are running on the provisioned host
@@ -119,7 +123,7 @@ class Provisioner {
     }
 
     // Run cinch teardown if runOnSlave was attempted with a provisioned host
-    if (config.runOnSlave && host.provisioned) {
+    if (config.connection == ConnType.CINCH && host.provisioned) {
       try {
         script.sh """
           . /home/jenkins/envs/provisioner/bin/activate
@@ -153,11 +157,15 @@ class Provisioner {
                               passwordVariable: 'JENKINS_SLAVE_PASSWORD')
     ]) {
       // Build template data
+      def runOnSlave = true
+      if (config.connection == ConnType.SSH ) {
+        runOnSlave = false
+      }
       def templateData = [:]
       templateData.arch = host.arch
       templateData.job_group = config.jobgroup
       templateData.hostrequires = config.hostrequires
-      templateData.hooks = [postUp: [connectToMaster: config.runOnSlave]]
+      templateData.hooks = [postUp: [connectToMaster: runOnSlave]]
       templateData.extra_vars = "{" +
         "\"rpm_key_imports\":[]," +
         "\"jenkins_master_repositories\":[]," +

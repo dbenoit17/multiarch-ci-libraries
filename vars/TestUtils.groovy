@@ -65,6 +65,7 @@ class TestUtils {
   }
 
   static def testWrapper(WorkflowScript script, ProvisioningConfig config, Closure test) {
+    String image_name = "${config.dockerUrl}/${config.tenant}/${config.provisioningImage}-${config.version}"
     script.podTemplate(
       name: "provisioner-${config.version}",
       label: "provisioner-${config.version}",
@@ -76,17 +77,40 @@ class TestUtils {
         // This adds the custom provisioner slave container to the pod. Must be first with name 'jnlp'
         script.containerTemplate(
           name: 'jnlp',
-          image: "${config.dockerUrl}/${config.tenant}/${config.provisioningImage}-${config.version}",
+          image: image_name,
           ttyEnabled: false,
           args: '${computer.jnlpmac} ${computer.name}',
           command: '',
-          workingDir: '/tmp',
-          privileged: true
+          workingDir: '/tmp'
         )
       ]
     ) {
       script.ansiColor('xterm') {
         script.timestamps {
+          if (config.connection == ConnType.CONTAINER) {
+            script.podTemplate(
+              name: "container-test-${config.version}",
+              label: "container-test-${config.version}",
+              cloud: config.cloudName,
+              serviceAccount: 'jenkins',
+              idleMinutes: 0,
+              namespace: config.tenant,
+              containers: [
+                script.containerTemplate(
+                  name: 'jnlp',
+                  image: image_name,
+                  ttyEnabled: false,
+                  args: '${computer.jnlpmac} ${computer.name}',
+                  command: '',
+                  workingDir: '/tmp'
+                )
+              ]) {
+                script.node("container-test-${config.version}") {
+                   test()
+                }
+              }
+            return
+          }
           test()
         }
       }

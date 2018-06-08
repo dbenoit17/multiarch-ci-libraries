@@ -49,8 +49,8 @@ class ProvisioningConfig {
   // Extra arguments passed to the jswarm call.
   // Allows for the connection to be tunneled in the case of an OpenShift hosted Jenkins.
   String jswarmExtraArgs = ""
-  // Whether the closure should be run on directly on the provisioned host.
-  Boolean runOnSlave = true
+  // Type of connection to the testing host
+  ConnType connection = ConnType.CINCH
   // Whether Ansible should be installed on the provisioned host.
   // This will only be respected if runOnSlave is also set to true,
   // since jobs that are run via ssh already have access to ansible in the
