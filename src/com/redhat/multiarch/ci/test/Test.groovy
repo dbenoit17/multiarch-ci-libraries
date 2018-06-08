@@ -3,6 +3,7 @@ package com.redhat.multiarch.ci.test
 import com.redhat.multiarch.ci.provisioner.Host
 import com.redhat.multiarch.ci.provisioner.Provisioner
 import com.redhat.multiarch.ci.provisioner.ProvisioningConfig
+import com.redhat.multiarch.ci.provisioner.ConnType
 
 class Test {
   def script
@@ -56,7 +57,7 @@ class Test {
         return
       }
 
-      if (config.runOnSlave) {
+      if (config.connection == ConnType.CINCH) {
         script.node(host.name) {
           try {
             test(host, config)

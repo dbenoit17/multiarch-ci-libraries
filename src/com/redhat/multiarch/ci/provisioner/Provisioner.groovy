@@ -1,6 +1,9 @@
 package com.redhat.multiarch.ci.provisioner
+import com.redhat.multiarch.ci.provisioner.ConnType
+import com.redhat.multiarch.ci.provisioner.HostType
 
 import groovy.json.*
+import java.util.LinkedHashMap
 
 class Provisioner {
   def script
@@ -22,6 +25,9 @@ class Provisioner {
       target: 'jenkins-slave',
       name: "${arch}-slave"
     )
+    if (config.hostType == HostType.CONTAINER) {
+      return host
+    }
 
     try {
       installCredentials(script)
@@ -35,13 +41,20 @@ class Provisioner {
 
       // Attempt provisioning
       host.initialized = true
+      script.sh "echo ${config.hostType}"
 
+      // Configure ssh port 
       // Install ssh keys so that either cinch or direct ssh will connect
-      script.sh """
-        . /home/jenkins/envs/provisioner/bin/activate
-        linchpin --workspace ${config.provisioningWorkspaceDir} --template-data \'${getTemplateData(host)}\' --verbose up ${host.target}
+      if (config.hostType == HostType.BEAKER) {
+        script.sh """
+          . /home/jenkins/envs/provisioner/bin/activate
+          linchpin --workspace ${config.provisioningWorkspaceDir} --template-data \'${getTemplateData(host)}\' --verbose up ${host.target}
       """
-
+      }
+      if (config.hostType == HostType.VM) {
+        provisionKubevirtVM(config, host)
+        config.connection = ConnType.SSH
+      }
 
       // We need to scan for inventory file. Please see the following for reasoning:
       // - https://github.com/CentOS-PaaS-SIG/linchpin/issues/430
@@ -52,16 +65,16 @@ class Provisioner {
       host.inventory = script.sh(returnStdout: true, script: """
           readlink -f ${config.provisioningWorkspaceDir}/inventories/*.inventory
           """).trim()
-
+      script.sh "cat ${host.inventory}"
       // Now that we have the inventory file, we should populate the hostName
       // With the name of the master node
       host.hostName = script.sh(returnStdout: true, script: """
-          awk '/\\[master_node\\]/{getline; print}' ${host.inventory}
+          gawk '/\\[master_node\\]/{getline; print \$1}' ${host.inventory}
           """).trim()
 
       host.provisioned = true
 
-      if (config.runOnSlave) {
+      if (config.connection == ConnType.CINCH) {
         host.connectedToMaster = true
 
         // We only care if the install ansible flag is set when we are running on the provisioned host
@@ -119,7 +132,7 @@ class Provisioner {
     }
 
     // Run cinch teardown if runOnSlave was attempted with a provisioned host
-    if (config.runOnSlave && host.provisioned) {
+    if (config.connection == ConnType.CINCH && host.provisioned) {
       try {
         script.sh """
           . /home/jenkins/envs/provisioner/bin/activate
@@ -131,13 +144,38 @@ class Provisioner {
     }
 
     if (host.initialized) {
-      try {
-        script.sh """
-          . /home/jenkins/envs/provisioner/bin/activate
-          linchpin --workspace ${config.provisioningWorkspaceDir} --template-data \'${getTemplateData(host)}\' --verbose destroy ${host.target}
-        """
-      } catch (e) {
-        script.echo "${e}"
+      if (config.hostType == HostType.VM) {
+        def openshift = script.openshift
+        openshift.withCluster() {
+          openshift.withProject( 'redhat-multiarch-qe' ) { 
+            script.withCredentials([script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY')]) {
+              try {
+                openshift.raw('delete', 'vm', host.name)
+              } catch (e) {
+                script.echo "${e}"
+              }
+              try {
+                openshift.raw('delete', 'vmi', host.name)
+              } catch (e) {
+                script.echo "${e}"
+              }
+              try {
+                openshift.raw('delete', 'svc', host.name)
+              } catch (e) {
+                script.echo "${e}"
+              }
+            }
+          }
+        }
+      } else {
+        try {
+          script.sh """
+            . /home/jenkins/envs/provisioner/bin/activate
+            linchpin --workspace ${config.provisioningWorkspaceDir} --template-data \'${getTemplateData(host)}\' --verbose destroy ${host.target}
+          """
+        } catch (e) {
+          script.echo "${e}"
+        }
       }
     }
 
@@ -153,11 +191,15 @@ class Provisioner {
                               passwordVariable: 'JENKINS_SLAVE_PASSWORD')
     ]) {
       // Build template data
+      def runOnSlave = true
+      if (config.connection == ConnType.SSH ) {
+        runOnSlave = false
+      }
       def templateData = [:]
       templateData.arch = host.arch
       templateData.job_group = config.jobgroup
       templateData.hostrequires = config.hostrequires
-      templateData.hooks = [postUp: [connectToMaster: config.runOnSlave]]
+      templateData.hooks = [postUp: [connectToMaster: runOnSlave]]
       templateData.extra_vars = "{" +
         "\"rpm_key_imports\":[]," +
         "\"jenkins_master_repositories\":[]," +
@@ -182,23 +224,29 @@ class Provisioner {
   void installCredentials(def script) {
     script.withCredentials([
       script.file(credentialsId: config.keytabCredentialId, variable: 'KEYTAB'),
-      script.usernamePassword(credentialsId: config.krbPrincipalCredentialId,
-                              usernameVariable: 'KRB_PRINCIPAL',
-                              passwordVariable: ''),
       script.file(credentialsId: config.sshPrivKeyCredentialId, variable: 'SSHPRIVKEY'),
       script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY'),
       script.file(credentialsId: config.krbConfCredentialId, variable: 'KRBCONF'),
-      script.file(credentialsId: config.bkrConfCredentialId, variable: 'BKRCONF')
     ]) {
       script.env.HOME = "/home/jenkins"
-      script.sh """
-        sudo yum install -y krb5-workstation || yum install -y krb5-workstation
-        sudo cp ${script.KRBCONF} /etc/krb5.conf || cp ${script.KRBCONF} /etc/krb5.conf
-        sudo mkdir -p /etc/beaker || mkdir -p /etc/beaker
-        sudo cp ${script.BKRCONF} /etc/beaker/client.conf || cp ${script.BKRCONF} /etc/beaker/client.conf
-        sudo chmod 644 /etc/krb5.conf || chmod 644 /etc/krb5.conf
-        sudo chmod 644 /etc/beaker/client.conf || chmod 644 /etc/beaker/client.conf
-        kinit ${script.KRB_PRINCIPAL} -k -t ${script.KEYTAB}
+      if (config.hostType == HostType.BEAKER) {
+        script.withCredentials(
+          [script.usernamePassword(credentialsId: config.krbPrincipalCredentialId,
+                              usernameVariable: 'KRB_PRINCIPAL',
+                              passwordVariable: ''),
+           script.file(credentialsId: config.bkrConfCredentialId, variable: 'BKRCONF')]) {
+          script.sh """
+            sudo yum install -y krb5-workstation || yum install -y krb5-workstation
+            sudo cp ${script.KRBCONF} /etc/krb5.conf || cp ${script.KRBCONF} /etc/krb5.conf
+            sudo mkdir -p /etc/beaker || mkdir -p /etc/beaker
+            sudo cp ${script.BKRCONF} /etc/beaker/client.conf || cp ${script.BKRCONF} /etc/beaker/client.conf
+            sudo chmod 644 /etc/krb5.conf || chmod 644 /etc/krb5.conf
+            sudo chmod 644 /etc/beaker/client.conf || chmod 644 /etc/beaker/client.conf
+            kinit ${script.KRB_PRINCIPAL} -k -t ${script.KEYTAB}
+         """
+       }
+     } 
+     """
         mkdir -p ~/.ssh
         cp ${script.SSHPRIVKEY} ~/.ssh/id_rsa
         cp ${script.SSHPUBKEY} ~/.ssh/id_rsa.pub
@@ -223,5 +271,89 @@ class Provisioner {
       sudo yum install -y rhpkg
       git config --global user.name "jenkins"
     """
+  }
+
+  void provisionKubevirtVM(ProvisioningConfig config, Host host) {
+  script.stage('provision vm') {
+    // Alias openshift plugin
+    def openshift = script.openshift
+    openshift.withCluster() {
+      openshift.withProject( 'redhat-multiarch-qe' ) { 
+        script.withCredentials([script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY'),
+         script.file(credentialsId: config.sshPrivKeyCredentialId, variable: 'SSHPRIVKEY')]) {
+            // Generate name for kubevirt VM
+            host.name = "virt-container-" + 
+              UUID.randomUUID().toString().substring(0,6)
+            def public_key = script.sh(script: "cat ${script.SSHPUBKEY}",
+                                       returnStdout: true)
+            def template = openshift.selector('template', 'vm-template-linux')
+            def name = host.name
+            // Process the kubevirt VM template
+            def result = 
+              openshift.raw("process vm-template-linux -p NAME=${name}",
+                            "-p REGISTRY_IP=172.30.1.1 -p PROJECT=redhat-multiarch-qe", 
+                            "-p IMAGE=fedora28 -p 'SSHPUBKEY=${public_key}'")
+            // Create the VM
+            openshift.create(result.out)
+            // Launch the VM
+            openshift.raw('patch', 'virtualmachine', name, 
+              '--type merge -p \'{"spec":{"running":true}}\'')
+
+            // Get the VM description 
+            def svc = openshift.selector('svc', name).describe()
+            // Get the public node port
+            def vm_node_port = 
+              script.sh(script: "printf '${svc}' |" +
+                        " gawk 'match(\$0, /NodePort/)" +
+                          "{print substr(\$3,0,length(\$3)-4)}'",
+                        returnStdout: true).replaceAll("\\s","")
+            def oc_version = openshift.raw('version')
+            def cluster_ip = 
+              script.sh(script: "printf '${oc_version}' |" +
+                                  " gawk 'match(\$0, /Server/)" +
+                                    "{print substr(\$2,9,length(substr(\$2,9)))}'",
+                                returnStdout: true).tokenize(':')[0]
+            // VM IP defaults to the cluster IP
+            def vm_ip = cluster_ip
+            // Wait for VM to boot
+            script.sh "sleep 90s"
+            // If cluster has a localhost IP, get the VM's local IP
+            // and use port 22 for ssh
+            if (vm_ip.substring(0,3) == '172') {
+              def vm_desc = openshift.raw('describe', 'vmi', name)
+              vm_ip = 
+                script.sh(script: "printf '${vm_desc}' |" +
+                                    " gawk 'match(\$0, /Ip Address/)" +
+                                      "{print \$3}'",
+                                  returnStdout: true).replaceAll("\\s", "")
+              vm_node_port = '22'
+            }
+            // Set up the ansible inventory
+            def inventory_dir = "${config.provisioningWorkspaceDir}/inventories"
+            def inventory_file = "jenkins-slave.inventory"
+            def inventory_hosts = [
+              'rhel7',
+              'certificate_authority',
+              'repositories',
+              'master_node',
+              'jenkins_slave',
+              'all']
+            script.sh "mkdir -p ${inventory_dir}"
+            script.sh "printf '' > ${inventory_dir}/${inventory_file}"
+            inventory_hosts.each() {
+              script.sh "printf '[${it}]\n' >> ${inventory_dir}/${inventory_file}"
+              script.sh "printf '${vm_ip} ansible_port=${vm_node_port}\n\n'" +  
+                          " >> ${inventory_dir}/${inventory_file}"
+            }
+            // Set up .ssh/config 
+            script.sh "printf 'Host ${vm_ip}\n' > ~/.ssh/config"
+            script.sh "printf '    HostName ${vm_ip}\n' >> ~/.ssh/config"
+            script.sh "printf '    Port ${vm_node_port}\n' >> ~/.ssh/config"
+            script.sh 'cat ~/.ssh/config'
+            script.sh "ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'"
+        }
+      }   
+    }
+  }
   }
 }

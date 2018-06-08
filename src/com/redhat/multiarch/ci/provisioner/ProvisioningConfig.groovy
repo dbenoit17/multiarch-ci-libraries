@@ -49,8 +49,8 @@ class ProvisioningConfig {
   // Extra arguments passed to the jswarm call.
   // Allows for the connection to be tunneled in the case of an OpenShift hosted Jenkins.
   String jswarmExtraArgs = ""
-  // Whether the closure should be run on directly on the provisioned host.
-  Boolean runOnSlave = true
+  // Type of connection to the testing host
+  ConnType connection = ConnType.CINCH
   // Whether Ansible should be installed on the provisioned host.
   // This will only be respected if runOnSlave is also set to true,
   // since jobs that are run via ssh already have access to ansible in the
@@ -62,6 +62,17 @@ class ProvisioningConfig {
   // Whether rhpkg should be installed on the provisioned host
   // This is only needed for tests that will use it to install from pkgs.devel.redhat.com
   Boolean installRhpkg = false
+
+  HostType hostType = HostType.BEAKER
+
+  Integer sshPort = 22
+
+  String KubevirtInstanceName = "kubevirt-vm"
+  String KubevirtInstanceMem = "4096Mi"
+  String KubevirtInstanceCores = "4"
+  String KubevirtInstanceRegIP = "172.30.1.1"
+  String KubevirtInstanceProj = "redhat-multiarch-qe"
+  String KubevirtInstanceImage = "fedora28"
 
   ProvisioningConfig(params, env) {
     this.krbPrincipalCredentialId = params.KRBPRINCPALCREDENTIALID ?: this.krbPrincipalCredentialId
