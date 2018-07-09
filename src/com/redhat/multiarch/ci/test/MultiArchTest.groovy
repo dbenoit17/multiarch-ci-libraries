@@ -2,6 +2,7 @@ package com.redhat.multiarch.ci.test
 
 import com.redhat.multiarch.ci.provisioner.Provisioner
 import com.redhat.multiarch.ci.provisioner.ProvisioningConfig
+import com.redhat.multiarch.ci.provisioner.OpenshiftWrapper
 import com.redhat.multiarch.ci.task.Task
 import com.redhat.multiarch.ci.test.Test
 
@@ -28,6 +29,9 @@ class MultiArchTest {
     this.test = test
     this.onTestFailure = onTestFailure
     this.postTest = postTest
+
+    // this must be used as a global singleton
+    script.ocw = new OpenshiftWrapper()
   }
 
   /**

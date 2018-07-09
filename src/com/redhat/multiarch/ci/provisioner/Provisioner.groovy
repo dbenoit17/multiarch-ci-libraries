@@ -146,25 +146,27 @@ class Provisioner {
     if (host.initialized) {
       if (config.hostType == HostType.VM) {
         def openshift = script.openshift
-        openshift.withCluster() {
-          openshift.withProject( 'redhat-multiarch-qe' ) { 
-            script.withCredentials([script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY')]) {
-              try {
-                openshift.raw('delete', 'vm', host.name)
-              } catch (e) {
-                script.echo "${e}"
-              }
-              try {
-                openshift.raw('delete', 'vmi', host.name)
-              } catch (e) {
-                script.echo "${e}"
-              }
-              try {
-                openshift.raw('delete', 'svc', host.name)
-              } catch (e) {
-                script.echo "${e}"
-              }
+        script.withCredentials([script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY')]) {
+          try {
+            script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+              openshift.raw('delete', 'vm', host.name)
             }
+          } catch (e) {
+            script.echo "${e}"
+          }
+          try {
+            script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+              openshift.raw('delete', 'vmi', host.name)
+            }
+          } catch (e) {
+            script.echo "${e}"
+          }
+          try {
+            script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+              openshift.raw('delete', 'svc', host.name)
+            }
+          } catch (e) {
+            script.echo "${e}"
           }
         }
       } else {
@@ -277,37 +279,51 @@ class Provisioner {
   script.stage('provision vm') {
     // Alias openshift plugin
     def openshift = script.openshift
-    openshift.withCluster() {
-      openshift.withProject( 'redhat-multiarch-qe' ) { 
-        script.withCredentials([script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY'),
-         script.file(credentialsId: config.sshPrivKeyCredentialId, variable: 'SSHPRIVKEY')]) {
-            // Generate name for kubevirt VM
-            host.name = "virt-container-" + 
-              UUID.randomUUID().toString().substring(0,6)
-            def public_key = script.sh(script: "cat ${script.SSHPUBKEY}",
-                                       returnStdout: true)
-            def template = openshift.selector('template', 'vm-template-linux')
-            def name = host.name
-            // Process the kubevirt VM template
-            def result = 
+      script.withCredentials([script.file(credentialsId: config.sshPubKeyCredentialId, variable: 'SSHPUBKEY'),
+       script.file(credentialsId: config.sshPrivKeyCredentialId, variable: 'SSHPRIVKEY')]) {
+          // Generate name for kubevirt VM
+          host.name = "virt-container-" + 
+            UUID.randomUUID().toString().substring(0,6)
+          def public_key = script.sh(script: "cat ${script.SSHPUBKEY}",
+                                    returnStdout: true)
+          def template
+          script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+            template = openshift.selector('template', 'vm-template-linux')
+          }
+          def name = host.name
+          // Process the kubevirt VM template
+          def result
+          script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+            result = 
               openshift.raw("process vm-template-linux -p NAME=${name}",
                             "-p REGISTRY_IP=172.30.1.1 -p PROJECT=redhat-multiarch-qe", 
                             "-p IMAGE=fedora28 -p 'SSHPUBKEY=${public_key}'")
-            // Create the VM
+          }
+          // Create the VM
+          script.ocw.exec(null, 'redhat-multiarch-qe', script) {
             openshift.create(result.out)
-            // Launch the VM
+          }
+          // Launch the VM
+          script.ocw.exec(null, 'redhat-multiarch-qe', script) {
             openshift.raw('patch', 'virtualmachine', name, 
               '--type merge -p \'{"spec":{"running":true}}\'')
+          }
 
-            // Get the VM description 
-            def svc = openshift.selector('svc', name).describe()
-            // Get the public node port
-            def vm_node_port = 
-              script.sh(script: "printf '${svc}' |" +
-                        " gawk 'match(\$0, /NodePort/)" +
-                          "{print substr(\$3,0,length(\$3)-4)}'",
-                        returnStdout: true).replaceAll("\\s","")
-            def oc_version = openshift.raw('version')
+          // Get the VM description 
+          def svc
+          script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+            svc = openshift.selector('svc', name).describe()
+          }
+          // Get the public node port
+         def vm_node_port = 
+           script.sh(script: "printf '${svc}' |" +
+                     " gawk 'match(\$0, /NodePort/)" +
+                       "{print substr(\$3,0,length(\$3)-4)}'",
+                     returnStdout: true).replaceAll("\\s","")
+          def oc_version
+          script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+            oc_version = openshift.raw('version')
+          }
             def cluster_ip = 
               script.sh(script: "printf '${oc_version}' |" +
                                   " gawk 'match(\$0, /Server/)" +
@@ -315,17 +331,29 @@ class Provisioner {
                                 returnStdout: true).tokenize(':')[0]
             // VM IP defaults to the cluster IP
             def vm_ip = cluster_ip
-            // Wait for VM to boot
-            script.sh "sleep 90s"
-            // If cluster has a localhost IP, get the VM's local IP
-            // and use port 22 for ssh
-            if (vm_ip.substring(0,3) == '172') {
-              def vm_desc = openshift.raw('describe', 'vmi', name)
-              vm_ip = 
-                script.sh(script: "printf '${vm_desc}' |" +
+            def describeVm = {->
+              def vm_desc
+              script.ocw.exec(null, 'redhat-multiarch-qe', script) {
+                vm_desc = openshift.raw('describe', 'vmi', name)
+              }
+              vm_desc
+            }
+            def getVmIp = {description->
+                script.sh(script: "printf '${description}' |" +
                                     " gawk 'match(\$0, /Ip Address/)" +
                                       "{print \$3}'",
                                   returnStdout: true).replaceAll("\\s", "")
+            }
+            // If cluster has a localhost IP, get the VM's local IP
+            // and use port 22 for ssh
+            if (vm_ip.substring(0,3) == '172') {
+              vm_ip = ''
+              // Wait for kubevirt container to obtain an IP
+              // from openshift
+              while (vm_ip == '') {
+                script.sh "sleep 15s"
+                vm_ip = getVmIp(describeVm())
+              }
               vm_node_port = '22'
             }
             // Set up the ansible inventory
@@ -345,15 +373,35 @@ class Provisioner {
               script.sh "printf '${vm_ip} ansible_port=${vm_node_port}\n\n'" +  
                           " >> ${inventory_dir}/${inventory_file}"
             }
+            script.sh """
+            cat > ~/wait_for_vm.yml << END
+- name: wait for host
+  hosts: localhost
+  tasks:
+  - name: wait for host availability
+    local_action:
+      module: wait_for
+      port: 22
+      host: "{{ hostvars['localhost']['groups']['all'] }}"
+      search_regex: OpenSSH
+    delay: 30
+END
+"""
             // Set up .ssh/config 
-            script.sh "printf 'Host ${vm_ip}\n' > ~/.ssh/config"
-            script.sh "printf '    HostName ${vm_ip}\n' >> ~/.ssh/config"
-            script.sh "printf '    Port ${vm_node_port}\n' >> ~/.ssh/config"
-            script.sh 'cat ~/.ssh/config'
-            script.sh "ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'"
+            script.sh """
+             mkdir -p ~/.ssh && chmod 0600 ~/.ssh
+             cat ${script.SSHPRIVKEY} > ~/.ssh/id_rsa
+             cat ${script.SSHPUBKEY} > ~/.ssh/id_rsa.pub
+             chmod 0644 ~/.ssh/id_rsa
+             chmod 0644 ~/.ssh/id_rsa.pub
+             printf 'Host ${vm_ip}\n' > ~/.ssh/config
+             printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
+             printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
+             cat ~/.ssh/config
+             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml
+             ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
+           """
         }
-      }   
     }
-  }
   }
 }
