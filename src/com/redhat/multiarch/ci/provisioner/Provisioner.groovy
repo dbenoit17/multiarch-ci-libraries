@@ -401,7 +401,7 @@ END
              printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
              printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
              cat ~/.ssh/config
-             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml 
+             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml -u root
              ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
            """
         }
