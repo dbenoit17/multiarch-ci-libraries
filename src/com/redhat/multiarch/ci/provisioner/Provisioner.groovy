@@ -381,10 +381,10 @@ class Provisioner {
   - name: wait for host availability
     local_action:
       module: wait_for
-      port: 22
+      port: ${vm_node_port}
       host: "{{ hostvars['localhost']['groups']['all'] }}"
       search_regex: OpenSSH
-    delay: 30
+    delay: 15
 END
 """
             // Set up .ssh/config 
@@ -398,7 +398,7 @@ END
              printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
              printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
              cat ~/.ssh/config
-             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml
+             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml -vvvv
              ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
            """
         }
