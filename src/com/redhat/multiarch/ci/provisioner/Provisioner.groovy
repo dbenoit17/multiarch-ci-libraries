@@ -373,27 +373,6 @@ class Provisioner {
               script.sh "printf '${vm_ip} ansible_port=${vm_node_port}\n\n'" +  
                           " >> ${inventory_dir}/${inventory_file}"
             }
-            script.sh """
-            cat > ~/wait_for_vm.yml << END
-- name: wait for host
-  hosts: localhost
-  tasks:
-  - name: print vm hostname
-    debug:
-      var: hostvars['localhost']['groups']['all']
-  - name: print vm node port
-    debug:
-      msg: ${vm_node_port}
-  - name: wait for host availability
-    local_action:
-      module: wait_for
-      port: ${vm_node_port}
-      host: "{{ hostvars['localhost']['groups']['all'] }}"
-      search_regex: OpenSSH
-      timeout: 600
-    delay: 15
-END
-"""
             // Set up .ssh/config 
             script.sh """
              mkdir -p ~/.ssh && chmod 0600 ~/.ssh
@@ -404,8 +383,13 @@ END
              printf 'Host ${vm_ip}\n' > ~/.ssh/config
              printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
              printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
+             alias test_ssh='ssh root@${vm_ip} -p ${vm_node_port} -i ${script.SSHPRIVKEY} true'
+             test_ssh
+             while test $? ! -eq 0 ; do
+               sleep 15
+               test_ssh
+             done
              cat ~/.ssh/config
-             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml 
              ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
            """
         }
