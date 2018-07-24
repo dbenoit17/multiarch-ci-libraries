@@ -383,10 +383,12 @@ class Provisioner {
              printf 'Host ${vm_ip}\n' > ~/.ssh/config
              printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
              printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
-             alias test_ssh='ssh root@${vm_ip} -p ${vm_node_port} -i ${script.SSHPRIVKEY}'
-             while test `test_ssh` -ne 0 ; do
+             alias test_ssh='ssh root@${vm_ip} -p ${vm_node_port} -i ${script.SSHPRIVKEY} && echo true || echo false'
+             RESULT=`test_ssh`
+             while test $RESULT == "false" ; do
                echo "Target host unavailable.  Waiting..."
                sleep 15
+               RESULT=`test_ssh`
              done
              cat ~/.ssh/config
              ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
