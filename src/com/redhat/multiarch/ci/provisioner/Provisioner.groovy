@@ -388,7 +388,6 @@ class Provisioner {
              while test \$? -ne 0 ; do
                echo "Target host unavailable.  Waiting..."
                sleep 15
-               test_ssh
              done
              cat ~/.ssh/config
              ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
