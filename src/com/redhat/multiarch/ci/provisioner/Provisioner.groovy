@@ -387,6 +387,7 @@ class Provisioner {
       port: ${vm_node_port}
       host: "{{ hostvars['localhost']['groups']['all'] }}"
       search_regex: OpenSSH
+      timeout: 600
     delay: 15
 END
 """
@@ -395,13 +396,13 @@ END
              mkdir -p ~/.ssh && chmod 0600 ~/.ssh
              cat ${script.SSHPRIVKEY} > ~/.ssh/id_rsa
              cat ${script.SSHPUBKEY} > ~/.ssh/id_rsa.pub
-             chmod 0644 ~/.ssh/id_rsa
-             chmod 0644 ~/.ssh/id_rsa.pub
+             chmod 0600 ~/.ssh/id_rsa
+             chmod 0600 ~/.ssh/id_rsa.pub
              printf 'Host ${vm_ip}\n' > ~/.ssh/config
              printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
              printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
              cat ~/.ssh/config
-             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml -u root
+             ansible-playbook -i ${inventory_dir}/${inventory_file} ~/wait_for_vm.yml 
              ssh -o StrictHostKeyChecking=no -i ${script.SSHPRIVKEY} root@${vm_ip} 'yum install -y python libselinux-python'
            """
         }
