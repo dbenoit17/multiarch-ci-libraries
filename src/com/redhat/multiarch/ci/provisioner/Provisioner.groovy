@@ -383,7 +383,7 @@ class Provisioner {
              printf 'Host ${vm_ip}\n' > ~/.ssh/config
              printf '    HostName ${vm_ip}\n' >> ~/.ssh/config
              printf '    Port ${vm_node_port}\n' >> ~/.ssh/config
-             alias test_ssh='ssh root@${vm_ip} -p ${vm_node_port} -i ${script.SSHPRIVKEY} && echo true || echo false'
+             alias test_ssh='ssh -o StrictHostKeyChecking=no root@${vm_ip} -p ${vm_node_port} -i ${script.SSHPRIVKEY} && echo true || echo false'
              RESULT=`test_ssh`
              while test \$RESULT == "false" ; do
                echo "Target host unavailable.  Waiting..."
