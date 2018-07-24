@@ -378,9 +378,12 @@ class Provisioner {
 - name: wait for host
   hosts: localhost
   tasks:
-  - name: print vm name
+  - name: print vm hostname
     debug:
       var: hostvars['localhost']['groups']['all']
+  - name: print vm node port
+    debug:
+      msg: ${vm_node_port}
   - name: wait for host availability
     local_action:
       module: wait_for
